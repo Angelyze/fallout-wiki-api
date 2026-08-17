@@ -1,0 +1,80 @@
+<!-- Updated Blogger Frontend Code -->
+<!-- Replace the entire <script> section in your Blogger page with this code -->
+<!-- Keep your existing CSS -->
+
+<script>
+  // ← CHANGE THIS to your real Vercel URL
+  const PROXY_URL = 'https://YOUR-PROJECT-NAME.vercel.app/api/chat';
+
+  function formatMessage(message) {
+    message = message.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    message = message.replace(/\*(.*?)\*/g, '<em>$1</em>');
+    message = message.replace(/`(.*?)`/g, '<code>$1</code>');
+    message = message.replace(/\n/g, '<br>');
+    return message;
+  }
+
+  window.onload = function() {
+    displayAIMessage("Greetings, Wastelander! I am your AI Fallout Wikipedia, ready to assist you with my Fallout knowledge. What's on your mind?");
+  };
+
+  document.getElementById('user-input').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  });
+
+  async function sendMessage() {
+    const userInput = document.getElementById('user-input');
+    const loadingIndicator = document.getElementById('loading');
+    const message = userInput.value.trim();
+
+    if (!message) return;
+
+    displayUserMessage(message);
+    userInput.value = '';
+    loadingIndicator.style.display = 'block';
+
+    try {
+      const response = await fetch(PROXY_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ message: message })
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.reply) {
+        displayAIMessage(data.reply);
+      } else {
+        displayAIMessage("Error accessing the archives: " + (data.error || "Unknown error"));
+      }
+    } catch (error) {
+      console.error(error);
+      displayAIMessage("Connection lost. Please retry.");
+    }
+
+    loadingIndicator.style.display = 'none';
+  }
+
+  function displayUserMessage(message) {
+    const chatMessages = document.getElementById('chat-messages');
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'message user-message';
+    messageDiv.innerHTML = message.replace(/\n/g, '<br>');
+    chatMessages.appendChild(messageDiv);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+  }
+
+  function displayAIMessage(message) {
+    const chatMessages = document.getElementById('chat-messages');
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'message ai-message';
+    messageDiv.innerHTML = formatMessage(message);
+    chatMessages.appendChild(messageDiv);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+  }
+</script>
