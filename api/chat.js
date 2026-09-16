@@ -4,7 +4,37 @@ const DEFAULT_MODELS = [
   'gemini-2.5-flash-lite'
 ];
 const ATTEMPT_TIMEOUT_MS = 15000;
-const SYSTEM_PROMPT = 'You are a Fallout historian with detailed knowledge of all Fallout games and related content. Answer only about Fallout topics. Be helpful, immersive, and stay in character as a wasteland archivist. Keep answers concise unless asked for detail.';
+const SYSTEM_PROMPT = 'You are a Fallout historian with detailed knowledge of all Fallout games and related content. Answer only about Fallout topics. Be helpful, immersive, and stay in character as a wasteland archivist. Answer directly without repeating the question or adding a greeting. Usually use one or two short paragraphs; expand when asked for detail.';
+
+// Best-effort memory for this warm function instance, not a shared quota store.
+const modelCooldowns = new Map();
+let cooldownApiKey;
+
+function generationConfig(model) {
+  const config = { maxOutputTokens: 2048 };
+  if (model === 'gemini-flash-latest') config.thinkingConfig = { thinkingLevel: 'LOW' };
+  if (model === 'gemini-3.1-flash-lite') config.thinkingConfig = { thinkingLevel: 'MINIMAL' };
+  if (model === 'gemini-2.5-flash-lite') config.thinkingConfig = { thinkingBudget: 0 };
+  return config;
+}
+
+function quotaCooldownMs(response, data) {
+  const retryAfter = response.headers.get('retry-after');
+  let delayMs = NaN;
+  if (retryAfter) {
+    delayMs = /^\d+(\.\d+)?$/.test(retryAfter)
+      ? Number(retryAfter) * 1000 : Date.parse(retryAfter) - Date.now();
+  }
+  if (!Number.isFinite(delayMs)) {
+    const details = data?.error?.details;
+    const retry = Array.isArray(details)
+      ? details.find(detail => detail['@type'] === 'type.googleapis.com/google.rpc.RetryInfo') : undefined;
+    if (typeof retry?.retryDelay === 'string' && /^\d+(\.\d+)?s$/.test(retry.retryDelay)) {
+      delayMs = parseFloat(retry.retryDelay) * 1000;
+    }
+  }
+  return Math.max(1000, Math.min(Number.isFinite(delayMs) ? delayMs : 60000, 300000));
+}
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -34,15 +64,25 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Server misconfigured' });
   }
 
-  const body = JSON.stringify({
+  if (cooldownApiKey !== apiKey) {
+    modelCooldowns.clear();
+    cooldownApiKey = apiKey;
+  }
+  const payload = {
     systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-    contents: [{ role: 'user', parts: [{ text: message.trim() }] }],
-    generationConfig: { maxOutputTokens: 2048 }
-  });
+    contents: [{ role: 'user', parts: [{ text: message.trim() }] }]
+  };
   let allQuotaErrors = true;
+  const started = Date.now();
 
-  // Each message starts with the preferred model. Each model gets one attempt.
+  // Prefer the configured order, skipping models still in a failure cooldown.
   for (const model of models) {
+    const cooldown = modelCooldowns.get(model);
+    if (cooldown?.until > Date.now()) {
+      if (cooldown.status !== 429) allQuotaErrors = false;
+      continue;
+    }
+    modelCooldowns.delete(model);
     let response;
     let data;
     try {
@@ -51,7 +91,7 @@ export default async function handler(req, res) {
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-          body,
+          body: JSON.stringify({ ...payload, generationConfig: generationConfig(model) }),
           signal: AbortSignal.timeout(ATTEMPT_TIMEOUT_MS)
         }
       );
@@ -63,6 +103,7 @@ export default async function handler(req, res) {
       }
     } catch {
       allQuotaErrors = false;
+      modelCooldowns.set(model, { until: Date.now() + 15000, status: 503 });
       console.warn('Gemini request failed or timed out:', model);
       continue;
     }
@@ -70,7 +111,12 @@ export default async function handler(req, res) {
     if (!response.ok) {
       console.warn('Gemini request rejected:', model, response.status);
       if (response.status !== 429) allQuotaErrors = false;
-      if ([404, 408, 429, 500, 502, 503, 504].includes(response.status)) continue;
+      if ([404, 408, 429, 500, 502, 503, 504].includes(response.status)) {
+        const delayMs = response.status === 429 ? quotaCooldownMs(response, data)
+          : response.status === 404 ? 60000 : 15000;
+        modelCooldowns.set(model, { until: Date.now() + delayMs, status: response.status });
+        continue;
+      }
 
       // Bad credentials or invalid requests will not be fixed by changing models.
       return res.status(502).json({ error: 'The AI service could not process the request. Please contact the site owner.' });
@@ -87,11 +133,14 @@ export default async function handler(req, res) {
       return res.status(502).json({ error: 'No response from Gemini. Please try again.' });
     }
 
-    console.info('Gemini response model:', model);
+    const durationMs = Date.now() - started;
+    res.setHeader('Server-Timing', `chat;dur=${durationMs}`);
+    console.info('Gemini response:', { model, durationMs, thinkingTokens: data.usageMetadata?.thoughtsTokenCount || 0 });
     return res.status(200).json({ reply });
   }
 
-  res.setHeader('Retry-After', '60');
+  const nextAttemptMs = Math.min(...models.map(model => modelCooldowns.get(model)?.until || Date.now()));
+  res.setHeader('Retry-After', String(Math.max(1, Math.ceil((nextAttemptMs - Date.now()) / 1000))));
   return res.status(allQuotaErrors ? 429 : 503).json({
     error: allQuotaErrors
       ? 'The archives have reached their current AI quota. Please try again later.'

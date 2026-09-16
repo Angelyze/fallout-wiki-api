@@ -6,8 +6,10 @@ const originalFetch = globalThis.fetch;
 const originalKey = process.env.GEMINI_API_KEY;
 const originalModels = process.env.GEMINI_MODELS;
 let calls;
+let keySequence = 0;
 beforeEach(() => {
-  process.env.GEMINI_API_KEY = 'test-key';
+  // A new key also resets warm-instance cooldowns between independent tests.
+  process.env.GEMINI_API_KEY = `test-key-${++keySequence}`;
   delete process.env.GEMINI_MODELS;
   calls = [];
 });
@@ -49,20 +51,28 @@ test('preferred model succeeds without fallback; prompt and key stay server-side
   assert.deepEqual(res.body, { reply: 'War never changes.' });
   assert.equal(calls.length, 1);
   assert.match(calls[0].url, /models\/gemini-flash-latest:generateContent$/);
-  assert.equal(calls[0].options.headers['x-goog-api-key'], 'test-key');
+  assert.equal(calls[0].options.headers['x-goog-api-key'], process.env.GEMINI_API_KEY);
   const payload = JSON.parse(calls[0].options.body);
   assert.equal(payload.contents[0].parts[0].text, 'Who founded the Brotherhood?');
   assert.match(payload.systemInstruction.parts[0].text, /Fallout historian/);
+  assert.deepEqual(payload.generationConfig.thinkingConfig, { thinkingLevel: 'LOW' });
+  assert.match(res.headers['Server-Timing'], /^chat;dur=\d+$/);
   assert.ok(calls[0].options.signal instanceof AbortSignal);
 });
 
-test('quota failures fall back in order and every new message starts at Flash', async () => {
-  responses(new Response('', { status: 429 }), new Response('', { status: 429 }), success(), success());
+test('quota failures skip exhausted models until cooldown expires, then restore preference', async t => {
+  let now = 1000000;
+  t.mock.method(Date, 'now', () => now);
+  responses(new Response('', { status: 429 }), new Response('', { status: 429 }), success(), success(), success());
   assert.equal((await request()).statusCode, 200);
+  assert.equal((await request()).statusCode, 200);
+  now += 60001;
   assert.equal((await request()).statusCode, 200);
   assert.deepEqual(calls.map(call => call.url.split('/models/')[1].split(':')[0]), [
-    'gemini-flash-latest', 'gemini-3.1-flash-lite', 'gemini-2.5-flash-lite', 'gemini-flash-latest'
+    'gemini-flash-latest', 'gemini-3.1-flash-lite', 'gemini-2.5-flash-lite', 'gemini-2.5-flash-lite', 'gemini-flash-latest'
   ]);
+  assert.deepEqual(JSON.parse(calls[1].options.body).generationConfig.thinkingConfig, { thinkingLevel: 'MINIMAL' });
+  assert.deepEqual(JSON.parse(calls[2].options.body).generationConfig.thinkingConfig, { thinkingBudget: 0 });
 });
 
 for (const status of [404, 408, 500, 502, 503, 504]) {
@@ -93,6 +103,8 @@ test('all quota failures return 429 with no extra attempts', async () => {
   const res = await request();
   assert.equal(res.statusCode, 429);
   assert.equal(res.headers['Retry-After'], '60');
+  // A second request on this instance should fail quickly without more API calls.
+  assert.equal((await request()).statusCode, 429);
   assert.equal(calls.length, 3);
 });
 test('mixed exhausted failures return 503', async () => {
@@ -137,4 +149,58 @@ test('invalid model configuration fails before making requests', async () => {
     assert.equal((await request()).statusCode, 500);
   }
   assert.equal(calls.length, 0);
+});
+
+test('Google RetryInfo controls when a quota-limited model is retried', async t => {
+  let now = 1000000;
+  t.mock.method(Date, 'now', () => now);
+  process.env.GEMINI_MODELS = 'gemini-flash-latest';
+  responses(Response.json({ error: { details: [
+    { '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: '25s' }
+  ] } }, { status: 429 }), success());
+  const first = await request();
+  assert.equal(first.headers['Retry-After'], '25');
+  now += 10000;
+  const second = await request();
+  assert.equal(second.statusCode, 429);
+  assert.equal(second.headers['Retry-After'], '15');
+  assert.equal(calls.length, 1);
+  now += 15001;
+  assert.equal((await request()).statusCode, 200);
+  assert.equal(calls.length, 2);
+});
+
+test('Retry-After header is honored and long delays are capped at five minutes', async t => {
+  t.mock.method(Date, 'now', () => 1000000);
+  process.env.GEMINI_MODELS = 'gemini-flash-latest';
+  responses(new Response('', { status: 429, headers: { 'Retry-After': '3600' } }));
+  assert.equal((await request()).headers['Retry-After'], '300');
+});
+
+test('network failures get a short cooldown and can recover', async t => {
+  let now = 1000000;
+  t.mock.method(Date, 'now', () => now);
+  responses(new TypeError('offline'), success(), success(), success());
+  assert.equal((await request()).statusCode, 200);
+  assert.equal((await request()).statusCode, 200);
+  assert.match(calls[2].url, /gemini-3.1-flash-lite:/);
+  now += 15001;
+  assert.equal((await request()).statusCode, 200);
+  assert.match(calls[3].url, /gemini-flash-latest:/);
+});
+
+test('rotating an API key clears cooldowns from the old key', async () => {
+  process.env.GEMINI_MODELS = 'gemini-flash-latest';
+  responses(new Response('', { status: 429 }), success());
+  assert.equal((await request()).statusCode, 429);
+  process.env.GEMINI_API_KEY += '-rotated';
+  assert.equal((await request()).statusCode, 200);
+  assert.equal(calls.length, 2);
+});
+
+test('custom models are not sent unverified thinking settings', async () => {
+  process.env.GEMINI_MODELS = 'gemini-custom';
+  responses(success());
+  assert.equal((await request()).statusCode, 200);
+  assert.equal(JSON.parse(calls[0].options.body).generationConfig.thinkingConfig, undefined);
 });
