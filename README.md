@@ -1,6 +1,37 @@
 # Fallout Wiki API
 
-A secure backend proxy for the Fallout Wiki AI chatbot. This Vercel serverless function safely holds your Gemini API key server-side and provides a secure endpoint for your Blogger frontend.
+A backend proxy for the Fallout Wiki AI chatbot. This Vercel serverless function holds your Gemini API key server-side and provides an endpoint for your Blogger frontend. The endpoint is public; authentication and rate limiting are not implemented.
+
+## Connecting the existing Fallout Hub chats
+
+1. Revoke any API keys included in the public Blogger page/widget scripts. If Vercel uses one of those keys, replace `GEMINI_API_KEY` with a new key in its Production environment.
+2. Push these changes to the repository connected to Vercel and deploy to Production.
+3. Copy the project's stable **production domain** from Vercel, then append `/api/chat`. The supplied deployment-specific URL redirected to Vercel login during inspection. Use a public production domain; Vercel's Standard Protection can keep preview/deployment URLs protected while allowing production visitors. See [Deployment Protection](https://vercel.com/docs/deployment-protection).
+4. Put that public endpoint in `PROXY_URL` in `BLOGGER_FRONTEND.html`.
+5. Replace the old AI chat `<script>` in **both** the wiki page and the floating Blogger widget with this script. Keep their existing HTML/CSS. Remove both original scripts and their embedded keys; leaving either in place causes conflicts. Use the same endpoint in both copies.
+6. Open the wiki page signed out, test the embedded chat and floating widget separately, then test the widget on the home page. Successful requests should go to your Vercel `/api/chat` endpoint and return `{ "reply": "..." }`.
+
+The replacement script scopes input, loading state, and messages to each chat container, so the existing duplicate element IDs do not mix conversations. It preserves widget open/close behavior, prevents duplicate sends while waiting, renders user input as text, and escapes AI/error text before adding basic formatting. Browser layout still needs checking after pasting into Blogger.
+
+## Model fallback
+
+Each message tries these models in order, stopping at the first answer:
+
+1. `gemini-flash-latest`
+2. `gemini-3.1-flash-lite`
+3. `gemini-2.5-flash-lite`
+
+The Flash-Lite choices have lower published text-token prices than current Flash models. Model availability, prices, and quotas can change: see Google's [models](https://ai.google.dev/gemini-api/docs/models), [pricing](https://ai.google.dev/gemini-api/docs/pricing), and [rate limits](https://ai.google.dev/gemini-api/docs/rate-limits). The `latest` alias can change its underlying model. Quotas are per project, vary by model, and are not reset by fallback. On a paid project, successful fallback requests are billed normally.
+
+Fallback happens on HTTP 429 (quota), 404 (unavailable model), 408, 500, 502, 503, 504, network failures, and timeouts. Invalid requests/credentials and safety blocks stop immediately. Each model gets one attempt with a 15-second timeout; Vercel's function duration is set to 60 seconds. Every new message starts at the first model; there is no persistent quota cooldown or shared cache. Exhausted quotas return 429; mixed availability failures return 503.
+
+Optionally set `GEMINI_MODELS` in Vercel to a comma-separated ordered list of one to three model IDs, then redeploy. The default requires only `GEMINI_API_KEY`. Model selection cannot be overridden by the browser. Vercel logs include attempted model names/statuses and the successful model, but not messages or keys.
+
+Messages are limited to 6,000 characters and generations to 2,048 output tokens (including any model thinking), so long answers may be cut short. The request uses Gemini's `systemInstruction` field for the Fallout persona. This guides behavior; it is not a guarantee against prompt injection. There is no conversation history.
+
+## Local checks
+
+Use Node.js 22 or newer and run `npm test`. Tests mock Gemini, so they need no API key and consume no quota. In restricted environments that cannot spawn test workers, run `node --test --test-isolation=none` on Node.js 24. Live model access must still be checked after deployment.
 
 ## Project Structure
 
@@ -72,11 +103,11 @@ See `BLOGGER_FRONTEND.html` for the complete updated code.
 
 ## Security Features
 
-✅ API key is **never exposed** in public code  
-✅ System prompt is **protected on the server**  
-✅ CORS headers properly configured  
-✅ Proper error handling with detailed error messages  
-✅ Input validation  
+- API key is stored on the server, not included in the replacement frontend.
+- System instructions are configured on the server.
+- CORS allows the Blogger frontend to call the endpoint.
+- Model fallback and user-facing errors avoid exposing upstream diagnostics.
+- Input validation limits the size and type of messages.
 
 ## API Endpoint
 

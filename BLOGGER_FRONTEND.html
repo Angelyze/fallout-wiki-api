@@ -1,80 +1,129 @@
-<!-- Updated Blogger Frontend Code -->
-<!-- Replace the entire <script> section in your Blogger page with this code -->
-<!-- Keep your existing CSS -->
-
+<!-- Replace BOTH old AI chat scripts with this script (wiki page and widget).
+     Keep their HTML and CSS. It is safe to include this script in both places.
+     Set the same public production /api/chat URL in both copies. -->
 <script>
-  // ← CHANGE THIS to your real Vercel URL
-  const PROXY_URL = 'https://YOUR-PROJECT-NAME.vercel.app/api/chat';
+(() => {
+  if (window.__falloutHubChatLoaded) return;
+  window.__falloutHubChatLoaded = true;
+  const PROXY_URL = 'https://YOUR-PRODUCTION-DOMAIN.vercel.app/api/chat';
+
+  function escapeHTML(text) {
+    return text.replace(/[&<>"']/g, char => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[char]);
+  }
 
   function formatMessage(message) {
-    message = message.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-    message = message.replace(/\*(.*?)\*/g, '<em>$1</em>');
-    message = message.replace(/`(.*?)`/g, '<code>$1</code>');
-    message = message.replace(/\n/g, '<br>');
-    return message;
+    return escapeHTML(message)
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.*?)\*/g, '<em>$1</em>')
+      .replace(/`(.*?)`/g, '<code>$1</code>')
+      .replace(/\n/g, '<br>');
   }
 
-  window.onload = function() {
-    displayAIMessage("Greetings, Wastelander! I am your AI Fallout Wikipedia, ready to assist you with my Fallout knowledge. What's on your mind?");
-  };
+  function initialize() {
+    // Both live chats use the same element IDs. Scope each lookup to its chat.
+    document.querySelectorAll('[id="chat-messages"]').forEach(chatMessages => {
+      const root = chatMessages.closest('#chat-widget, .chat-container');
+      if (!root) return;
+      const userInput = root.querySelector('[id="user-input"]');
+      const loading = root.querySelector('[id="loading"]');
+      const sendButton = root.querySelector('[onclick*="sendMessage"]');
+      if (!userInput || !sendButton) return;
+      const isWidget = root.id === 'chat-widget';
+      let pending = false;
+      let greeted = false;
+      userInput.maxLength = 6000;
 
-  document.getElementById('user-input').addEventListener('keydown', function(e) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage();
-    }
-  });
+      function displayMessage(message, fromUser = false) {
+        const div = document.createElement('div');
+        div.className = 'message ' + (fromUser ? 'user-message' : 'ai-message');
+        if (isWidget) {
+          div.style.cssText = 'border-left:3px solid #ff9000;padding:5px;margin:5px 0;font-size:14px;';
+          div.style.background = fromUser ? '#111111' : '#222222';
+        }
+        if (fromUser) {
+          div.textContent = message;
+          div.style.whiteSpace = 'pre-wrap';
+        } else {
+          div.innerHTML = formatMessage(message);
+        }
+        chatMessages.appendChild(div);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+      }
 
-  async function sendMessage() {
-    const userInput = document.getElementById('user-input');
-    const loadingIndicator = document.getElementById('loading');
-    const message = userInput.value.trim();
+      function greet() {
+        if (greeted) return;
+        greeted = true;
+        displayMessage('Greetings, Wastelander! Ask me anything about the Fallout universe.');
+      }
 
-    if (!message) return;
+      async function sendMessage() {
+        const message = userInput.value.trim();
+        if (!message || pending) return;
+        pending = true;
+        sendButton.disabled = true;
+        displayMessage(message, true);
+        userInput.value = '';
+        if (loading) {
+          loading.style.display = 'block';
+          loading.setAttribute('aria-hidden', 'false');
+        }
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 55000);
+        try {
+          const response = await fetch(PROXY_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message }),
+            signal: controller.signal
+          });
+          const data = await response.json();
+          displayMessage(response.ok && typeof data.reply === 'string'
+            ? data.reply
+            : 'Error accessing the archives: ' + (data.error || 'Please try again later.'));
+        } catch {
+          displayMessage('Connection lost or the archives took too long to respond. Please retry.');
+        } finally {
+          clearTimeout(timeout);
+          pending = false;
+          sendButton.disabled = false;
+          if (loading) {
+            loading.style.display = 'none';
+            loading.setAttribute('aria-hidden', 'true');
+          }
+        }
+      }
 
-    displayUserMessage(message);
-    userInput.value = '';
-    loadingIndicator.style.display = 'block';
-
-    try {
-      const response = await fetch(PROXY_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ message: message })
+      sendButton.removeAttribute('onclick');
+      sendButton.addEventListener('click', event => { event.preventDefault(); sendMessage(); });
+      userInput.addEventListener('keydown', event => {
+        if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+          event.preventDefault();
+          sendMessage();
+        }
       });
 
-      const data = await response.json();
-
-      if (response.ok && data.reply) {
-        displayAIMessage(data.reply);
+      if (isWidget) {
+        const icon = document.getElementById('chat-icon');
+        const close = root.querySelector('[id="close-chat"]');
+        icon?.addEventListener('click', () => {
+          root.style.display = 'block';
+          icon.style.display = 'none';
+          chatMessages.style.maxHeight = Math.max(100, window.innerHeight - 150) + 'px';
+          greet();
+        });
+        close?.addEventListener('click', () => {
+          root.style.display = 'none';
+          if (icon) icon.style.display = 'block';
+        });
       } else {
-        displayAIMessage("Error accessing the archives: " + (data.error || "Unknown error"));
+        greet();
       }
-    } catch (error) {
-      console.error(error);
-      displayAIMessage("Connection lost. Please retry.");
-    }
-
-    loadingIndicator.style.display = 'none';
+    });
   }
 
-  function displayUserMessage(message) {
-    const chatMessages = document.getElementById('chat-messages');
-    const messageDiv = document.createElement('div');
-    messageDiv.className = 'message user-message';
-    messageDiv.innerHTML = message.replace(/\n/g, '<br>');
-    chatMessages.appendChild(messageDiv);
-    chatMessages.scrollTop = chatMessages.scrollHeight;
-  }
-
-  function displayAIMessage(message) {
-    const chatMessages = document.getElementById('chat-messages');
-    const messageDiv = document.createElement('div');
-    messageDiv.className = 'message ai-message';
-    messageDiv.innerHTML = formatMessage(message);
-    chatMessages.appendChild(messageDiv);
-    chatMessages.scrollTop = chatMessages.scrollHeight;
-  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initialize, { once: true });
+  else initialize();
+})();
 </script>
