@@ -4,6 +4,12 @@ A backend proxy for the Fallout Wiki AI chatbot. This Vercel serverless function
 
 ## Connecting the existing Fallout Hub chats
 
+For the complete embedded wiki page, paste `BLOGGER_WIKI_PAGE.html` into **Blogger > Pages > Wiki > HTML view**, replacing the old chat block. It includes the supplied layout/styles and the backend integration at `https://fallout-wiki-api.vercel.app/api/chat`. Its `fh-wiki-` IDs and scoped styles keep it independent of the floating widget. This file is page content, so it omits the pasted `<b:includable>` theme wrapper. Remove the old page script and revoke its exposed key; replace Vercel's key too if it is the same credential. The template's rendered appearance still needs checking after saving in Blogger.
+
+For the complete floating widget, copy all of `BLOGGER_WIDGET.html` into the existing Blogger HTML/JavaScript gadget, replacing its old contents. It preserves the supplied design, uses separate `fh-` element IDs, and is already configured for `https://fallout-wiki-api.vercel.app/api/chat`. It can coexist with the old embedded wiki chat while that page is migrated separately. The public endpoint passed an OPTIONS/CORS check and returned a successful chat reply during verification.
+
+`BLOGGER_FRONTEND.html` is the script-only replacement for the existing embedded wiki chat layout (and the older, unrenamed widget layout). Its endpoint is also configured for the public domain above. Do not add it inside the new complete widget, which already includes its own script.
+
 1. Revoke any API keys included in the public Blogger page/widget scripts. If Vercel uses one of those keys, replace `GEMINI_API_KEY` with a new key in its Production environment.
 2. Push these changes to the repository connected to Vercel and deploy to Production.
 3. Copy the project's stable **production domain** from Vercel, then append `/api/chat`. The supplied deployment-specific URL redirected to Vercel login during inspection. Use a public production domain; Vercel's Standard Protection can keep preview/deployment URLs protected while allowing production visitors. See [Deployment Protection](https://vercel.com/docs/deployment-protection).

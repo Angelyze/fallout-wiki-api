@@ -1,10 +1,43 @@
-<!-- Replace BOTH old AI chat scripts with this script (wiki page and widget).
-     Keep their HTML and CSS. It is safe to include this script in both places.
-     Set the same public production /api/chat URL in both copies. -->
+<!-- Fallout Hub widget: replace the entire old Blogger gadget with this code. -->
+<!-- AI Assistant -->
+<div id="fh-chat-icon" style="position: fixed; bottom: 20px; right: 20px; width: 50px; height: 50px; cursor: pointer; z-index: 1001;">
+  <img src="https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEhwM9Kpx6GypIXeqbhMOBAtGkhB9-zLgD7uAvTII3ST5-b1cRK9GzYRI6V-iFiW4_KsHIYsa3CgJ5TuahxNU0GaycShq_2aXdmpUUTyRxpC5geoc1hUHUsjoLeUzmS5iOvgv7z_i2boAFoyZEcs_SsfslAPqU8CxxwvhYtpM8kfY7eFxWObtUyHOtF7M0rF/s114/Fallout%20hub%20114.png" alt="Chat Icon" style="width: 100%; height: 100%; transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'" />
+</div>
+
+<!-- Chat widget, initially hidden, with dynamic height and styled scrollbar -->
+<div id="fh-chat-widget" style="position: fixed; bottom: 20px; right: 20px; width: 350px; max-width: calc(100vw - 40px); background: #333333; border-radius: 5px; box-shadow: 0 0 10px rgba(0,0,0,0.5); color: #fafafa; font-family: Arial, sans-serif; z-index: 1000; display: none;">
+  <div style="position: relative;">
+    <button type="button" aria-label="Close chat" id="fh-close-chat" style="position: absolute; top: 5px; right: 5px; background: #ff9000; color: #000; border: none; border-radius: 50%; width: 20px; height: 20px; line-height: 20px; text-align: center; cursor: pointer; font-weight: bold;">X</button>
+    <div role="log" aria-live="polite" id="fh-chat-messages" style="overflow-y: auto; padding: 10px; max-height: calc(100vh - 150px); scrollbar-width: thin; scrollbar-color: #ff9000 #333333;"></div>
+    <div role="status" aria-hidden="true" id="fh-loading" style="color: #ff9000; text-align: center; margin: 10px 0; display: none;">Processing...</div>
+    <div style="padding: 10px; display: flex; gap: 5px;">
+      <textarea aria-label="Your Fallout question" id="fh-user-input" style="flex: 1; min-width: 0; background: #2a2a2a; border: 1px solid #ff9000; color: #fafafa; padding: 5px; border-radius: 5px; resize: none; height: 40px; font-size: 14px;" placeholder="Ask me about Fallout..."></textarea>
+      <button data-fh-send type="button" style="background: #ff9000; color: #000; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-weight: bold;">Send</button>
+    </div>
+  </div>
+</div>
+
+<style>
+  /* Webkit scrollbar styling for Chrome, Safari, Edge */
+  #fh-chat-messages::-webkit-scrollbar {
+    width: 6px;
+  }
+  #fh-chat-messages::-webkit-scrollbar-track {
+    background: #333333;
+  }
+  #fh-chat-messages::-webkit-scrollbar-thumb {
+    background: #ff9000;
+    border-radius: 3px;
+  }
+  #fh-chat-messages::-webkit-scrollbar-thumb:hover {
+    background: #f7cb4d; /* Lighter shade from your theme's hover color */
+  }
+</style>
+
 <script>
 (() => {
-  if (window.__falloutHubChatLoaded) return;
-  window.__falloutHubChatLoaded = true;
+  if (window.__falloutHubWidgetLoaded) return;
+  window.__falloutHubWidgetLoaded = true;
   const PROXY_URL = 'https://fallout-wiki-api.vercel.app/api/chat';
 
   function escapeHTML(text) {
@@ -22,22 +55,22 @@
   }
 
   function initialize() {
-    // Both live chats use the same element IDs. Scope each lookup to its chat.
-    document.querySelectorAll('[id="chat-messages"]').forEach(chatMessages => {
-      const root = chatMessages.closest('#chat-widget, .chat-container');
+    // Widget IDs and handlers are independent of the embedded wiki chat.
+    document.querySelectorAll('[id="fh-chat-messages"]').forEach(chatMessages => {
+      const root = chatMessages.closest('#fh-chat-widget');
       if (!root) return;
-      const userInput = root.querySelector('[id="user-input"]');
-      const loading = root.querySelector('[id="loading"]');
-      const sendButton = root.querySelector('[onclick*="sendMessage"]');
+      const userInput = root.querySelector('[id="fh-user-input"]');
+      const loading = root.querySelector('[id="fh-loading"]');
+      const sendButton = root.querySelector('[data-fh-send]');
       if (!userInput || !sendButton) return;
-      const isWidget = root.id === 'chat-widget';
+      const isWidget = root.id === 'fh-chat-widget';
       let pending = false;
       let greeted = false;
       userInput.maxLength = 6000;
 
       function displayMessage(message, fromUser = false) {
         const div = document.createElement('div');
-        div.className = 'message ' + (fromUser ? 'user-message' : 'ai-message');
+        div.className = 'fh-message ' + (fromUser ? 'fh-user-message' : 'fh-ai-message');
         if (isWidget) {
           div.style.cssText = 'border-left:3px solid #ff9000;padding:5px;margin:5px 0;font-size:14px;';
           div.style.background = fromUser ? '#111111' : '#222222';
@@ -95,7 +128,6 @@
         }
       }
 
-      sendButton.removeAttribute('onclick');
       sendButton.addEventListener('click', event => { event.preventDefault(); sendMessage(); });
       userInput.addEventListener('keydown', event => {
         if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
@@ -105,8 +137,8 @@
       });
 
       if (isWidget) {
-        const icon = document.getElementById('chat-icon');
-        const close = root.querySelector('[id="close-chat"]');
+        const icon = document.getElementById('fh-chat-icon');
+        const close = root.querySelector('[id="fh-close-chat"]');
         icon?.addEventListener('click', () => {
           root.style.display = 'block';
           icon.style.display = 'none';

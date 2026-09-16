@@ -1,0 +1,283 @@
+<!-- Paste this entire block into the Blogger wiki page HTML view, replacing the old chat code. -->
+<style>
+#fh-wiki-chat {
+      background-color: #333333 !important;
+      color: #f0f0f0 !important;
+      font-family: Arial, sans-serif !important;
+      margin: 0;
+      padding: 0;
+    }
+#fh-wiki-chat {
+      background-color: #333333;
+      width: 100%;
+      min-height: 400px;
+      display: flex;
+      flex-direction: column;
+      border-radius: 5px;
+      margin: 10px 0;
+    }
+#fh-wiki-chat #fh-wiki-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 10px;
+      padding-bottom: 80px;
+    }
+#fh-wiki-chat .message {
+      margin: 10px 0;
+      padding: 15px;
+      border-radius: 8px;
+      word-wrap: break-word;
+      line-height: 1.5;
+      white-space: pre-wrap;
+    }
+#fh-wiki-chat .user-message {
+      background-color: #111111;
+      border-left: 3px solid #ff9000;
+      font-size: 15px;
+      color: #f0f0f0;
+    }
+#fh-wiki-chat .ai-message {
+      background-color: #222222;
+      border-left: 3px solid #ff9000;
+      font-size: 16px;
+      letter-spacing: 0.3px;
+      padding-left: 10px;
+      color: #f0f0f0;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
+#fh-wiki-chat .message + .message {
+      margin-top: 10px;
+    }
+#fh-wiki-chat .input-area {
+      position: relative;
+      background-color: #333333;
+      padding: 10px;
+    }
+#fh-wiki-chat .input-container {
+      display: flex;
+      gap: 10px;
+    }
+#fh-wiki-chat #fh-wiki-input {
+      flex: 1;
+      min-width: 0;
+      background-color: #2a2a2a;
+      border: 1px solid #ff9000;
+      color: #f0f0f0;
+      padding: 10px;
+      border-radius: 5px;
+      resize: none;
+      height: 40px;
+      font-size: 16px;
+      min-height: 40px;
+      box-sizing: border-box;
+      max-width: 100%;
+    }
+#fh-wiki-chat button {
+      background-color: #ff9000;
+      color: #000000;
+      border: none;
+      padding: 0 20px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-weight: bold;
+      height: 40px;
+      white-space: nowrap;
+    }
+#fh-wiki-chat button:hover {
+      background-color: #ff9333;
+    }
+#fh-wiki-chat #fh-wiki-loading {
+      color: #ff9000;
+      text-align: center;
+      margin: 10px 0;
+      display: none;
+    }
+#fh-wiki-chat ::-webkit-scrollbar {
+      width: 0px;
+    }
+#fh-wiki-chat ::-webkit-scrollbar-track {
+      background: #1b1b1b;
+    }
+#fh-wiki-chat ::-webkit-scrollbar-thumb {
+      background: #ff9000;
+      border-radius: 0px;
+    }
+#fh-wiki-chat ::placeholder {
+      color: #666666;
+    }
+#fh-wiki-chat .ai-message h1 {
+      font-size: 24px;
+      color: #ffffff;
+      margin: 10px 0;
+      font-weight: bold;
+    }
+#fh-wiki-chat .ai-message h2 {
+      font-size: 20px;
+      color: #ffffff;
+      margin: 8px 0;
+      font-weight: bold;
+    }
+#fh-wiki-chat .ai-message p {
+      margin: 10px 0;
+      line-height: 1.6;
+    }
+#fh-wiki-chat .ai-message ul, #fh-wiki-chat .ai-message ol {
+      margin: 10px 0;
+      padding-left: 20px;
+    }
+#fh-wiki-chat .ai-message li {
+      margin: 5px 0;
+    }
+#fh-wiki-chat .ai-message strong {
+      font-weight: bold;
+    }
+#fh-wiki-chat .ai-message em {
+      font-style: italic;
+    }
+#fh-wiki-chat .ai-message code {
+      background-color: #2a2a2a;
+      padding: 2px 4px;
+      border-radius: 3px;
+      color: #ff9000;
+      font-family: 'Courier New', Courier, monospace;
+    }
+#fh-wiki-chat .ai-message > :first-child {
+      margin-top: 0;
+    }
+#fh-wiki-chat .ai-message > :last-child {
+      margin-bottom: 0;
+    }
+
+    @media (max-width: 768px) {
+#fh-wiki-chat {
+        max-height: none;
+      }
+#fh-wiki-chat #fh-wiki-messages {
+        max-height: none;
+      }
+#fh-wiki-chat .input-area {
+        flex-shrink: 0;
+      }
+    }
+  
+#fh-wiki-chat button:disabled { opacity: 0.65; cursor: wait; }
+</style>
+
+  <div id="fh-wiki-chat" class="chat-container">
+    <div aria-label="Chat messages" id="fh-wiki-messages" role="log" aria-live="polite"></div>
+    <div role="status" aria-hidden="true" id="fh-wiki-loading">Processing...</div>
+    
+    <div class="input-area">
+      <div class="input-container">
+        <textarea aria-label="Type your question here" id="fh-wiki-input" rows="1" maxlength="6000"></textarea>
+        <button aria-label="Send message" type="button" data-fh-wiki-send>Send</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+(() => {
+  if (window.__falloutHubWikiLoaded) return;
+  window.__falloutHubWikiLoaded = true;
+  const PROXY_URL = 'https://fallout-wiki-api.vercel.app/api/chat';
+
+  function escapeHTML(text) {
+    return text.replace(/[&<>"']/g, char => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[char]);
+  }
+
+  function formatMessage(message) {
+    return escapeHTML(message)
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.*?)\*/g, '<em>$1</em>')
+      .replace(/`(.*?)`/g, '<code>$1</code>')
+      .replace(/\n/g, '<br>');
+  }
+
+  function initialize() {
+    // Keep the wiki page independent of the floating widget.
+    document.querySelectorAll('[id="fh-wiki-messages"]').forEach(chatMessages => {
+      const root = chatMessages.closest('#fh-wiki-chat');
+      if (!root) return;
+      const userInput = root.querySelector('[id="fh-wiki-input"]');
+      const loading = root.querySelector('[id="fh-wiki-loading"]');
+      const sendButton = root.querySelector('[data-fh-wiki-send]');
+      if (!userInput || !sendButton) return;
+      let pending = false;
+      let greeted = false;
+      userInput.maxLength = 6000;
+
+      function displayMessage(message, fromUser = false) {
+        const div = document.createElement('div');
+        div.className = 'message ' + (fromUser ? 'user-message' : 'ai-message');
+        if (fromUser) {
+          div.textContent = message;
+          div.style.whiteSpace = 'pre-wrap';
+        } else {
+          div.innerHTML = formatMessage(message);
+        }
+        chatMessages.appendChild(div);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+      }
+
+      function greet() {
+        if (greeted) return;
+        greeted = true;
+        displayMessage('Greetings, Wastelander! I am your AI Fallout Wikipedia, ready to assist you with my Fallout knowledge. What is on your mind?');
+      }
+
+      async function sendMessage() {
+        const message = userInput.value.trim();
+        if (!message || pending) return;
+        pending = true;
+        sendButton.disabled = true;
+        displayMessage(message, true);
+        userInput.value = '';
+        if (loading) {
+          loading.style.display = 'block';
+          loading.setAttribute('aria-hidden', 'false');
+        }
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 55000);
+        try {
+          const response = await fetch(PROXY_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message }),
+            signal: controller.signal
+          });
+          const data = await response.json();
+          displayMessage(response.ok && typeof data.reply === 'string'
+            ? data.reply
+            : 'Error accessing the archives: ' + (data.error || 'Please try again later.'));
+        } catch {
+          displayMessage('Connection lost or the archives took too long to respond. Please retry.');
+        } finally {
+          clearTimeout(timeout);
+          pending = false;
+          sendButton.disabled = false;
+          if (loading) {
+            loading.style.display = 'none';
+            loading.setAttribute('aria-hidden', 'true');
+          }
+        }
+      }
+
+      sendButton.addEventListener('click', event => { event.preventDefault(); sendMessage(); });
+      userInput.addEventListener('keydown', event => {
+        if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+          event.preventDefault();
+          sendMessage();
+        }
+      });
+
+      greet();
+
+    });
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initialize, { once: true });
+  else initialize();
+})();
+</script>
